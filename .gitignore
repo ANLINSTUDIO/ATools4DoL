@@ -1,0 +1,8 @@
+node_modules/
+game-source/
+asapi/\[1] 分发.bat
+*.vsix
+.trae/
+
+
+atools-annotations.json

@@ -1,0 +1,374 @@
+{
+  "name": "atools4dol",
+  "displayName": "ATools4DoL",
+  "description": "DoL Mod 开发工具",
+  "version": "0.0.1",
+  "publisher": "needmeet",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onFileSystem:atools-src",
+    "workspaceContains:**/boot.json",
+    "onLanguage:twee3",
+    "onLanguage:javascript"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "atools4dol",
+          "title": "ATools4DoL",
+          "icon": "media/atools.svg"
+        }
+      ]
+    },
+    "views": {
+      "atools4dol": [
+        {
+          "id": "atools4dol.search",
+          "name": "搜索",
+          "type": "webview",
+          "icon": "media/atools-search.svg",
+          "when": "bootJsonPresent"
+        },
+        {
+          "id": "atools4dol.source",
+          "name": "游戏源码",
+          "icon": "media/atools-source.svg",
+          "when": "bootJsonPresent"
+        },
+        {
+          "id": "atools4dol.boot",
+          "name": "boot",
+          "type": "webview",
+          "icon": "media/atools-boot.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "atools4dol.source",
+        "contents": "尚未扫描游戏源码。\n[选择游戏源码 HTML](command:atools4dol.pickGameSource)\n[扫描游戏源码](command:atools4dol.scanGameSource)"
+      }
+    ],
+    "configuration": {
+      "title": "ATools4DoL",
+      "properties": {
+        "atools4dol.gameSourcePath": {
+          "type": "string",
+          "default": "**/Degrees of Lewdity.html",
+          "markdownDescription": "游戏源码 HTML 路径（绝对路径或工作区 glob）。换游戏版本时改这里即可自动重扫候选。"
+        },
+        "atools4dol.i18nPath": {
+          "type": "string",
+          "default": "**/i18n.json",
+          "markdownDescription": "汉化数据 JSON 路径（绝对路径或工作区 glob），用于「汉化反查」与源码中英切换。"
+        },
+        "atools4dol.bootPath": {
+          "type": "string",
+          "default": "**/boot.json",
+          "markdownDescription": "要编辑/写入补丁的 boot.json（绝对路径或工作区 glob）。工作区里有多个模组时用它锁定目标，可用 boot 面板标题栏的「选择 boot.json」按钮从列表里直接指定。"
+        },
+        "atools4dol.statsPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "统计用的模组源码目录（留空则用工作区根目录）。扫描其中的 .twee/.js，统计宏/变量/函数使用频率，用于候选排序。"
+        },
+        "atools4dol.excludeGlobs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "不做错误检查的文件（glob 模式，相对工作区根目录）。例如 `**/node_modules/**`、`**/测试模组/**`。命中的文件不显示「未定义的宏 / 段落不存在」等诊断。"
+        },
+        "atools4dol.linkProject": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "在工作区模组文件（`.twee` / `.js`）里为宏、`[[段落]]` 显示下划线并可点击。"
+        },
+        "atools4dol.linkSource": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "在「游戏源码」虚拟文档（源码树 / 搜索结果打开的段落、JS）里显示下划线并可点击。"
+        },
+        "atools4dol.gotoProject": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "在工作区模组文件里按住 Ctrl 悬停高亮、Ctrl+点击跳转定义，以及悬停预览。"
+        },
+        "atools4dol.gotoSource": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "在「游戏源码」虚拟文档里按住 Ctrl 悬停高亮、Ctrl+点击跳转定义，以及悬停预览。"
+        },
+        "atools4dol.completion": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "宏、`$变量`、`setup.` 成员的自动补全。"
+        },
+        "atools4dol.autoClose": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "输入宏名后的空格时（如 `<<if `）自动补上闭端：`<<if >>` 换行 `<</if>>`。"
+        },
+        "atools4dol.diagnostics": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "twee 语法检查：闭端配对、空条件 / 缺参数、段落 / widget 重名、未定义的宏与段落。"
+        },
+        "atools4dol.yenToDollar": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "输入中文人民币符号 `￥` / `¥` 时自动转换成 `$`。"
+        },
+        "atools4dol.safeAnchor": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "命令「生成 ReplacePatcher 锚点补丁」套用安全锚点：锚点边界避开会被 `i18n.json` 翻译覆盖的裸文本 / 字符串，优先落在宏、HTML tag、标识符、注释上。关闭后完全按你选中的原文生成。虚拟 passage 自动生成的补丁始终套用安全锚点。"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "atools4dol.pack",
+        "title": "ATools4DoL: 打包",
+        "icon": "$(package)"
+      },
+      {
+        "command": "atools4dol.push",
+        "title": "ATools4DoL: 推送到游戏",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "atools4dol.scanGameSource",
+        "title": "ATools4DoL: 扫描游戏源码（刷新补全）",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "atools4dol.pickGameSource",
+        "title": "ATools4DoL: 选择游戏源码 HTML",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "atools4dol.pickI18n",
+        "title": "ATools4DoL: 选择翻译补丁 JSON",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "atools4dol.buildStats",
+        "title": "ATools4DoL: 统计模组源码使用频率",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "atools4dol.toChinese",
+        "title": "ATools4DoL: 源码显示中文",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "atools4dol.toEnglish",
+        "title": "ATools4DoL: 源码显示英文",
+        "icon": "$(check)"
+      },
+      {
+        "command": "atools4dol.openSource",
+        "title": "ATools4DoL: 打开源码条目"
+      },
+      {
+        "command": "atools4dol.findInSource",
+        "title": "ATools4DoL: 汉化反查源码位置"
+      },
+      {
+        "command": "atools4dol.makeReplacePatch",
+        "title": "ATools4DoL: 生成 ReplacePatcher 锚点补丁"
+      },
+      {
+        "command": "atools4dol.refreshBoot",
+        "title": "ATools4DoL: 重新载入 boot.json",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "atools4dol.pickBoot",
+        "title": "ATools4DoL: 选择 boot.json",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "atools4dol.toggleFav",
+        "title": "ATools4DoL: 收藏 / 取消收藏",
+        "icon": "$(star)"
+      },
+      {
+        "command": "atools4dol.filterSource",
+        "title": "ATools4DoL: 按文件名筛选游戏源码",
+        "icon": "$(search)"
+      },
+      {
+        "command": "atools4dol.createBoot",
+        "title": "ATools4DoL: 创建默认 boot.json",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "atools4dol.openExcludeSettings",
+        "title": "ATools4DoL: 排除检查（哪些文件不检查）",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "atools4dol.excludeFile",
+        "title": "ATools4DoL: 不检查此文件"
+      },
+      {
+        "command": "atools4dol.excludeFolder",
+        "title": "ATools4DoL: 不检查此文件夹"
+      },
+      {
+        "command": "atools4dol.saveAsFile",
+        "title": "ATools4DoL: 保存为文件（改为文件替换）",
+        "icon": "$(file-add)"
+      },
+      {
+        "command": "atools4dol.undoEdit",
+        "title": "ATools4DoL: 撤销更改（恢复游戏原文）",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "atools4dol.openSettings",
+        "title": "ATools4DoL: 打开设置",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "atools4dol.openGameFile",
+        "title": "ATools4DoL: 定位游戏源码文件"
+      },
+      {
+        "command": "atools4dol.openI18nFile",
+        "title": "ATools4DoL: 定位翻译文件"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "atools4dol.config",
+        "label": "配置",
+        "icon": "$(settings-gear)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "atools4dol.openExcludeSettings",
+          "when": "view == atools4dol.search",
+          "group": "navigation@1"
+        },
+        {
+          "command": "atools4dol.openSettings",
+          "when": "view == atools4dol.search",
+          "group": "navigation@9"
+        },
+        {
+          "submenu": "atools4dol.config",
+          "when": "view == atools4dol.source",
+          "group": "navigation@1"
+        },
+        {
+          "command": "atools4dol.scanGameSource",
+          "when": "view == atools4dol.source",
+          "group": "navigation@2"
+        },
+        {
+          "command": "atools4dol.buildStats",
+          "when": "view == atools4dol.source",
+          "group": "navigation@3"
+        },
+        {
+          "command": "atools4dol.filterSource",
+          "when": "view == atools4dol.source",
+          "group": "navigation@4"
+        },
+        {
+          "command": "atools4dol.openSettings",
+          "when": "view == atools4dol.source",
+          "group": "navigation@9"
+        },
+        {
+          "command": "atools4dol.pickBoot",
+          "when": "view == atools4dol.boot",
+          "group": "navigation@1"
+        },
+        {
+          "command": "atools4dol.refreshBoot",
+          "when": "view == atools4dol.boot",
+          "group": "navigation@2"
+        },
+        {
+          "command": "atools4dol.createBoot",
+          "when": "view == atools4dol.boot",
+          "group": "navigation@3"
+        },
+        {
+          "command": "atools4dol.openSettings",
+          "when": "view == atools4dol.boot",
+          "group": "navigation@9"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "atools4dol.toggleFav",
+          "when": "view == atools4dol.source && viewItem =~ /^card/",
+          "group": "inline@1"
+        }
+      ],
+      "atools4dol.config": [
+        {
+          "command": "atools4dol.pickGameSource",
+          "group": "1@1"
+        },
+        {
+          "command": "atools4dol.pickI18n",
+          "group": "1@2"
+        },
+        {
+          "command": "atools4dol.openGameFile",
+          "group": "2@1"
+        },
+        {
+          "command": "atools4dol.openI18nFile",
+          "group": "2@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "atools4dol.pack",
+          "when": "bootJsonPresent",
+          "group": "navigation"
+        },
+        {
+          "command": "atools4dol.push",
+          "when": "bootJsonPresent",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "atools4dol.excludeFolder",
+          "when": "explorerResourceIsFolder",
+          "group": "atools@1"
+        },
+        {
+          "command": "atools4dol.excludeFile",
+          "when": "!explorerResourceIsFolder",
+          "group": "atools@1"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "archiver": "^8.0.0",
+    "terser": "^5.51.2",
+    "ws": "^8.22.0"
+  }
+}

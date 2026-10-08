@@ -1,0 +1,19 @@
+{
+    "name": "atools4dol",
+    "nickname": "ATools4DoL",
+    "version": "0.0.1",
+    "styleFileList": [],
+    "scriptFileList": [],
+    "scriptFileList_inject_early": [
+        "game/atools4dol.js"
+    ],
+    "tweeFileList": [],
+    "imgFileList": [],
+    "addonPlugin": [],
+    "dependenceInfo": [
+        {
+            "modName": "ModHub",
+            "version": ">=1.0.0"
+        }
+    ]
+}
