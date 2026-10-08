@@ -1,32 +1,47 @@
 const { WebSocketServer } = require('ws');
 
+const PORT_BASE = 38471;
+const PORT_SPAN = 10;            // 38471 ~ 38480：多开 VSCode 窗口时每个窗口占一个
+
 let wss = null;
 let client = null;
 
-function startServer(port = 38471, onLog = console.log) {
+// 端口段自动占用：每个 VSCode 窗口是独立扩展宿主进程，都去绑 38471 时第二个会 EADDRINUSE，
+// 于是从基址开始逐个探到第一个空闲端口；游戏模组那边同时尝试连接这一整段。
+function startServer(basePort = PORT_BASE, onLog = console.log, onConnect = null) {
   if (wss) return wss;
 
-  wss = new WebSocketServer({ host: '127.0.0.1', port });
+  const max = basePort + PORT_SPAN - 1;
+  const tryBind = (p) => {
+    const server = new WebSocketServer({ host: '127.0.0.1', port: p });
 
-  wss.on('connection', (socket) => {
-    client = socket;
-    onLog('[ATools4DoL] 游戏已连接');
+    server.on('connection', (socket) => {
+      client = socket;
+      onLog('[ATools4DoL] 游戏已连接');
+      try { onConnect && onConnect(); } catch (e) { onLog('[ATools4DoL] onConnect 出错: ' + e.message); }
 
-    socket.on('close', () => {
-      if (client === socket) client = null;
-      onLog('[ATools4DoL] 游戏已断开');
+      socket.on('close', () => {
+        if (client === socket) client = null;
+        onLog('[ATools4DoL] 游戏已断开');
+      });
+
+      socket.on('error', (e) => {
+        onLog('[ATools4DoL] socket 错误: ' + e.message);
+      });
     });
 
-    socket.on('error', (e) => {
-      onLog('[ATools4DoL] socket 错误: ' + e.message);
+    server.on('listening', () => {
+      wss = server;
+      onLog(`[ATools4DoL] WebSocket 已监听 127.0.0.1:${p}`);
     });
-  });
 
-  wss.on('error', (e) => {
-    onLog('[ATools4DoL] server 错误: ' + e.message);
-  });
+    server.on('error', (e) => {
+      if (e.code === 'EADDRINUSE' && p < max) { tryBind(p + 1); return; }
+      onLog('[ATools4DoL] server 错误: ' + e.message);
+    });
+  };
 
-  onLog(`[ATools4DoL] WebSocket 已监听 127.0.0.1:${port}`);
+  tryBind(basePort);
   return wss;
 }
 
@@ -66,6 +81,12 @@ function pushZip(zipPath, meta = {}) {
   });
 }
 
+// 向已连接的游戏下发一条 JSON（用于补全名单等控制消息）
+function sendJSON(obj) {
+  if (!hasClient()) return false;
+  try { client.send(JSON.stringify(obj)); return true; } catch (e) { return false; }
+}
+
 function stopServer() {
   if (client) {
     try { client.close(); } catch {}
@@ -77,4 +98,4 @@ function stopServer() {
   }
 }
 
-module.exports = { startServer, pushZip, hasClient, stopServer };
+module.exports = { startServer, pushZip, hasClient, sendJSON, stopServer };

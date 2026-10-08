@@ -149,6 +149,22 @@ async function runPush() {
   }
 }
 
+// 右下角连接状态：游戏连上且当前是模组项目才显示；点击 = 打包并推送（runPush 内部已做「已连接」判断）
+function registerConnStatus(context) {
+  const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
+  item.command = 'atools4dol.push';
+  item.text = '$(circle-filled) 已连接';
+  item.tooltip = 'ATools4DoL：游戏已连接，点击打包并推送';
+  item.color = new vscode.ThemeColor('charts.green');
+  context.subscriptions.push(item);
+
+  // hasClient() 是同步的，轮询最省事；1s 一次开销可忽略
+  const sync = () => { if (bootInfo && hasClient()) item.show(); else item.hide(); };
+  const timer = setInterval(sync, 1000);
+  context.subscriptions.push({ dispose: () => clearInterval(timer) });
+  sync();
+}
+
 // ---------------- boot.json 可视化编辑（活动栏 Webview） ----------------
 let bootView = null;
 
@@ -1006,10 +1022,12 @@ function registerBootView(context) {
 }
 
 function activate(context) {
-  startServer(38471, (m) => getChannel().appendLine(m));
+  // 游戏连上就下发一次宏候选，供其调试面板代码框的补全下拉使用
+  startServer(38471, (m) => getChannel().appendLine(m), () => gameSource()?.sendCompletion?.());
   require('./gamedata').registerGameData(context);
   registerBootView(context);
   updateBootJsonContext();
+  registerConnStatus(context);
 
   const watcher = vscode.workspace.createFileSystemWatcher('**/boot.json');
   watcher.onDidCreate(updateBootJsonContext);

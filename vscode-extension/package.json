@@ -123,10 +123,20 @@
           "default": true,
           "markdownDescription": "twee 语法检查：闭端配对、空条件 / 缺参数、段落 / widget 重名、未定义的宏与段落。"
         },
-        "atools4dol.yenToDollar": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "输入中文人民币符号 `￥` / `¥` 时自动转换成 `$`。"
+        "atools4dol.yenTo": {
+          "type": "string",
+          "enum": [
+            "off",
+            "gbp",
+            "usd"
+          ],
+          "enumDescriptions": [
+            "关闭：不做转换",
+            "转换成英镑 £",
+            "转换成美元 $"
+          ],
+          "default": "gbp",
+          "markdownDescription": "输入中文人民币符号 `￥` / `¥` 时自动转换成的货币符号。"
         },
         "atools4dol.safeAnchor": {
           "type": "boolean",
@@ -343,11 +353,6 @@
       "editor/title": [
         {
           "command": "atools4dol.pack",
-          "when": "bootJsonPresent",
-          "group": "navigation"
-        },
-        {
-          "command": "atools4dol.push",
           "when": "bootJsonPresent",
           "group": "navigation"
         }

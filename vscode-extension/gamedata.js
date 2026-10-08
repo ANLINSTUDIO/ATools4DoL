@@ -661,6 +661,7 @@ function registerGameData(context) {
         index = buildIndex(html, { gameVersion: ver, sourceHtml: src, sourceMtime: st.mtimeMs });
         try { fs.writeFileSync(indexPath(context), JSON.stringify(index)); } catch (e) { channel.appendLine('索引写入失败: ' + e.message); }
         channel.appendLine(`扫描完成 → 宏 ${index.macros.length + index.addMacros.length}｜setup ${Object.keys(index.setupAssign).length}｜$变量 ${index.variables.length}｜passage ${index.passages.length}｜js ${index.jsFiles.length}`);
+        sendCompletion();   // 游戏已连着的话，把新宏名刷新过去（没连时是空操作）
       }
     );
   }
@@ -740,9 +741,15 @@ function registerGameData(context) {
     return cnMode && txMap ? applyTx(body, txMap[tk]) : body;
   }
 
+  // 游戏内调试面板要的两样东西：宏候选（内置宏 + 扫描到的原版宏）与容器宏名单（自动补闭端用）。
+  // $变量 / setup / 对象成员都由游戏运行时即时解析，不必下发。
+  const completionMacros = () => [...new Set([...BUILTIN_MACRO, ...(index ? index.macros : []), ...(index ? index.addMacros : [])])];
+  const sendCompletion = () => require('./server').sendJSON({ type: 'atools-index', macros: completionMacros(), containers: [...CONTAINER_MACRO] });
+
   // 供 boot 面板校验补丁锚点：只读游戏源码原文（不含补丁/翻译）
   gameAccess = {
     ensure: ensureIndex,
+    sendCompletion,
     has: (kind, key) => {
       if (!index) return false;
       if (kind === 'js') return index.jsFiles.some((f) => f.path === key || f.base === key);
@@ -1454,7 +1461,15 @@ function registerGameData(context) {
       const line = document.lineAt(position.line).text.slice(0, position.character);
       const isTwee = isTweeDoc(document);
       if (isTwee && /<<[\w-]*$/.test(line)) {
-        return items([...index.macros, ...index.addMacros], vscode.CompletionItemKind.Function, '原版宏', (n) => index.macroDef[n]);
+        // if / for / widget 这些是 SugarCube 引擎内置宏，游戏源码里查不到定义，只有 BUILTIN_MACRO 有名单。
+        // sortText 加 \u0001 前缀压过按频率排的 rank()，让它们排在原版宏前面。
+        const builtin = [...BUILTIN_MACRO].map((n) => {
+          const it = new vscode.CompletionItem(n, vscode.CompletionItemKind.Keyword);
+          it.detail = '内置宏';
+          it.sortText = '\u0001' + n;
+          return it;
+        });
+        return builtin.concat(items([...index.macros, ...index.addMacros], vscode.CompletionItemKind.Function, '原版宏', (n) => index.macroDef[n]));
       }
       const ctx = setupCtx(line);
       if (ctx) {
@@ -1906,16 +1921,18 @@ function registerGameData(context) {
     vscode.workspace.onDidChangeTextDocument((e) => checkTwee(e.document)),
     vscode.workspace.onDidCloseTextDocument((d) => diag.delete(d.uri)),
     vscode.workspace.onDidSaveTextDocument((d) => { if (isTweeDoc(d) || /\.js$/i.test(d.uri.path)) scanWorkspaceDefs(); }),
-    // 输入中文人民币符号 ￥ / ¥ 自动替换成 $（单次输入事件、插入的正好是一个该字符才处理）
+    // 输入中文人民币符号 ￥ / ¥ 自动替换成设定的货币符号（单次输入事件、插入的正好是一个该字符才处理）
     vscode.workspace.onDidChangeTextDocument((e) => {
-      if (!projectActive || !cfgOn('yenToDollar') || e.document.isReadOnly) return;
+      const cur = cfg().get('yenTo');                       // off / gbp / usd
+      const sym = cur === 'gbp' ? '£' : cur === 'usd' ? '$' : '';
+      if (!projectActive || !sym || e.document.isReadOnly) return;
       if (!isSrcDoc(e.document) || e.contentChanges.length !== 1) return;
       const c = e.contentChanges[0];
       if (c.text !== '￥' && c.text !== '¥') return;
       const ed = vscode.window.visibleTextEditors.find((x) => x.document === e.document);
       if (!ed) return;
       const p = c.range.start;
-      ed.edit((b) => b.replace(new vscode.Range(p, new vscode.Position(p.line, p.character + 1)), '$'));
+      ed.edit((b) => b.replace(new vscode.Range(p, new vscode.Position(p.line, p.character + 1)), sym));
     })
   );
 
