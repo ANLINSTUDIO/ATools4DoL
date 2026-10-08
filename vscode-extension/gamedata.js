@@ -1899,9 +1899,11 @@ function registerGameData(context) {
     const m = /<<\s*([A-Za-z_$][\w$-]*)\s$/.exec(line.text.slice(0, end));
     if (!m || !CONTAINER_MACRO.has(m[1])) return;
     const nm = m[1];
-    // 行尾已有 >>（自动配对）时只补闭端；没有就顺手把开宏一起闭合，保证补完就能跑
-    const closed = /^>>/.test(line.text.slice(end).trimStart());
-    ed.edit((b) => b.insert(line.range.end, `${closed ? '' : '>>'}\n<</${nm}>>`));
+    // 光标后面若已跟着 >>（编辑器把 << 配对成了 <</>>），闭端就插在这个 >> 之后；否则把 >> 一起补在光标处。
+    // 两者都不换行、也不落在行尾：不然行内后面的内容会被一并包进容器里。
+    const mm = /^(\s*)>>/.exec(line.text.slice(end));
+    const ins = (mm ? '' : '>>') + `<</${nm}>>`;
+    ed.edit((b) => b.insert(new vscode.Position(line.lineNumber, mm ? end + mm[0].length : end), ins));
   }));
   // 排除检查：资源管理器右键加入 excludeGlobs
   const addExclude = (uri, isDir) => {
