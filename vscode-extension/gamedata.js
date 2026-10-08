@@ -530,8 +530,11 @@ window.addEventListener('message', (e) => {
   $('sum').textContent = d.note ? d.note : ('第 ' + page + ' 页 · 本页 ' + d.total + ' 条' + (d.more ? '（还有更多）' : ''));
   $('pg').style.display = d.total ? 'flex' : 'none';
   $('pinfo').textContent = '第 ' + page + ' 页';
+  // 真的还有上一页 / 下一页时按钮亮起蓝色（沿用 Aa/.* 那组开关的 .on 配色），没有就保持灰色并禁用
   $('prev').disabled = page <= 1;
   $('next').disabled = !d.more;
+  $('prev').classList.toggle('on', page > 1);
+  $('next').classList.toggle('on', !!d.more);
   const box = $('res'); box.innerHTML = '';
   for (const g of d.groups) {
     const gd = document.createElement('div'); gd.className = 'grp';
