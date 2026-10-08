@@ -86,14 +86,6 @@ window.AsAPI = { ...window.AsAPI,  // early inject
     // Debug
     debug: function(title, content, title_color = 'yellow') { if (AsAPI.debugon) this.log(title, content, title_color, 'gray', "warn") },
     debugon: false,
-}
-Object.defineProperty(window, 'asi', { get() { return window.AsAPI; }, configurable: true });
-/* AsAPI: End @early inject */
-
-
-
-/* AsAPI: Start @inject */
-window.AsAPI = { ...window.AsAPI,  // inject
     // 【工具】注入游戏函数，在调用原函数后再执行指定的功能。
     onFunction: function(originalFn, afterFn) {
         return new Proxy(originalFn, {
@@ -106,11 +98,11 @@ window.AsAPI = { ...window.AsAPI,  // inject
     },
     // 【工具】注入游戏宏，在调用原宏后再执行指定的功能。
     onMacro: function(macroName, afterFn) {
-        let originalMacro = Macro.get(macroName);
+        let originalMacro = SugarCube.Macro.get(macroName);
         if (originalMacro) {
             let oldHandler = originalMacro.handler;
-            Macro.delete(macroName);
-            Macro.add(macroName, {
+            SugarCube.Macro.delete(macroName);
+            SugarCube.Macro.add(macroName, {
                 handler: function () {
                     oldHandler.apply(this, arguments);
                     afterFn.apply(this, arguments);
@@ -150,11 +142,18 @@ window.AsAPI = { ...window.AsAPI,  // inject
     // 当没有 event 时重新加载当前 passage
     reload: function() {
         if (!V.event) {
-            Engine.play(passage());
+            SugarCube.Engine.play(passage());
             return true;
         }
         return false;
     },
 }
+Object.defineProperty(window, 'asi', { get() { return window.AsAPI; }, configurable: true });
+/* AsAPI: End @early inject */
+
+
+
+/* AsAPI: Start @inject */
+
 /* AsAPI: End @inject */
 
