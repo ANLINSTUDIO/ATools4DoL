@@ -10,10 +10,5 @@
     "tweeFileList": [],
     "imgFileList": [],
     "addonPlugin": [],
-    "dependenceInfo": [
-        {
-            "modName": "ModHub",
-            "version": ">=1.0.0"
-        }
-    ]
+    "dependenceInfo": []
 }

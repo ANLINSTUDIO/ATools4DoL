@@ -26,6 +26,16 @@
     console.log('[ATool-Push]', ...args);
   }
 
+  // 面板的输出区就是我们的提示条
+  function notify(text, isErr) {
+    log(text);
+    if (!outEl) return;
+    const line = document.createElement('div');
+    line.className = 'at-log' + (isErr ? ' at-err' : '');
+    line.textContent = text;
+    outEl.appendChild(line);
+  }
+
   function connectedCount() {
     let n = 0;
     for (const ws of conns.values()) if (ws.readyState === 1) n++;
@@ -148,25 +158,17 @@
       const installed = await installZip(blob, fileName);
 
       log('安装成功:', installed.modName, '，准备重载游戏');
-      window.modHubShowToast?.('ATool 推送安装完成，正在重载游戏…', 'success');
+      notify('推送安装完成（' + installed.modName + '），正在重载游戏…');
       setTimeout(() => location.reload(), 800);
     } catch (e) {
       log('处理包失败:', e.message);
-      window.modHubShowToast?.('ATool 推送安装失败: ' + e.message, 'error');
+      notify('推送安装失败: ' + e.message, true);
     }
   }
 
-  /**
-   * 把 zip 交给 ModLoader 落盘。
-   * 优先用 ModHub 的封装接口（含启用列表校验）；否则回退 ModLoader 原生控制器。
-   */
+  /** 把 zip 交给 ModLoader 原生控制器落盘。 */
   async function installZip(blob, fileName) {
-    // 方案 A：ModHub 封装接口
-    if (typeof window.modHubInstallModZip === 'function') {
-      return await window.modHubInstallModZip(blob, fileName);
-    }
-
-    // 方案 B：ModLoader 原生 ModLoadController（游戏自带，必然存在）
+    // ModLoader 原生 ModLoadController（游戏自带，必然存在）
     const controller = window.modSC2DataManager?.getModLoadController?.();
     if (!controller || typeof controller.addModIndexDB !== 'function') {
       throw new Error('未找到 ModLoader 存储接口 modSC2DataManager.getModLoadController()');
