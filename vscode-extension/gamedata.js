@@ -513,6 +513,14 @@ $('prev').onclick = () => { if (page > 1) { page--; go(); } };
 $('next').onclick = () => { page++; go(); };
 $('q').oninput = () => { clearTimeout(timer); timer = setTimeout(() => { page = 1; go(); }, 300); };
 $('q').onkeydown = (e) => { if (e.key === 'Enter') { clearTimeout(timer); page = 1; go(); } };
+// 获焦即全选：面板获焦（或点进搜索框）时直接选中全部内容，一键清空重输。
+// mouseup 兜底：输入框已有选中时再点进来，mousedown 会先清掉选中，focus 里 select() 的效果
+// 又被鼠标落点（focus 后 mouseup 才定光标）覆盖 —— 所以等 mouseup 后看：没拖出选区就重新全选
+$('q').addEventListener('focus', () => $('q').select());
+$('q').addEventListener('mouseup', () => { if ($('q').selectionStart === $('q').selectionEnd) $('q').select(); });
+// webview 拿到键盘焦点的第一时间把焦点收进搜索框：点击面板到 webview 真正获焦之间有空挡，
+// 这段空挡里按 Ctrl+A 会落到编辑器上（全选代码后一删就出事）；获焦即抢焦点能把空挡压到最短
+window.addEventListener('focus', () => { if (document.activeElement === document.body) $('q').focus(); });
 function go() {
   if (!$('q').value.trim()) { $('res').innerHTML = ''; $('sum').textContent = ''; return; }
   $('sum').innerHTML = '<span class="spin"></span>搜索中…';
@@ -522,7 +530,7 @@ function go() {
 function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 window.addEventListener('message', (e) => {
   const d = e.data;
-  if (d && d.type === 'focus') { $('q').focus(); return; }
+  if (d && d.type === 'focus') { $('q').focus(); $('q').select(); return; }
   if (!d || d.type !== 'result') return;
   page = d.page || 1;
   cn = !!d.cn;
@@ -546,7 +554,7 @@ window.addEventListener('message', (e) => {
       row.innerHTML = '<div class="ml"><span class="ln">' + (it.line || '') + '</span>' + esc(it.pre) + '<mark>' + esc(it.match) + '</mark>' + esc(it.post) + '</div>'
         + (it.sub ? '<div class="sl">' + esc(it.sub) + '</div>' : '');
       row.title = it.note || '';
-      row.onclick = () => vscode.postMessage({ type: 'open', g: g.g, key: g.key, label: g.label, desc: g.desc, off: it.off, len: it.len, cn: cn, find: it.find });
+      row.onclick = () => vscode.postMessage({ type: 'open', g: g.g, key: g.key, label: g.label, desc: g.desc, off: it.off, len: it.len, cn: cn, find: it.find, match: it.match });
       gd.appendChild(row);
     }
     box.appendChild(gd);
@@ -734,14 +742,23 @@ function registerGameData(context) {
     return fp.all ? body.split(fp.from).join(rep) : body.replace(fp.from, () => rep);
   }
 
+  const entryCache = new Map();   // entryContent 结果缓存：中文模式下打开大文件要跑 applyTx（几千条 split/join），没缓存每次点开都卡几秒
   function entryContent(kind, key) {
+    const ek = kind + '\n' + key;
+    const c = entryCache.get(ek);
+    if (c && c.e === srcEpoch) return c.t;
     const raw = rawContent(kind, key);
-    if (!raw) return '';
-    const tk = txKeyOf(kind, key);
-    const pt = patches[kind + ':' + tk];
-    let body = pt && raw.includes(pt.from) ? raw.replace(pt.from, () => pt.to) : raw;
-    for (const fp of tRep[kind + ':' + tk] || []) body = applyFilePat(body, fp);   // boot 里的文件替换也要合并显示
-    return cnMode && txMap ? applyTx(body, txMap[tk]) : body;
+    let t = '';
+    if (raw) {
+      const tk = txKeyOf(kind, key);
+      const pt = patches[kind + ':' + tk];
+      let body = pt && raw.includes(pt.from) ? raw.replace(pt.from, () => pt.to) : raw;
+      for (const fp of tRep[kind + ':' + tk] || []) body = applyFilePat(body, fp);   // boot 里的文件替换也要合并显示
+      t = cnMode && txMap ? applyTx(body, txMap[tk]) : body;
+    }
+    if (entryCache.size > 60) entryCache.clear();   // 上限兜底，防膨胀
+    entryCache.set(ek, { e: srcEpoch, t });
+    return t;
   }
 
   // 游戏内调试面板要的两样东西：宏候选（内置宏 + 扫描到的原版宏）与容器宏名单（自动补闭端用）。
@@ -793,6 +810,7 @@ function registerGameData(context) {
       }
     }
     channel.appendLine(`boot.json 恢复 ATool 补丁 ${Object.keys(patches).length} 条，文件替换 ${Object.keys(tRep).length} 段`);
+    entryCache.clear();   // 补丁变了，已缓存的内容全部作废（部分调用方不走 srcEpoch++）
   }
 
   async function savePatches() {
@@ -1058,14 +1076,78 @@ function registerGameData(context) {
     if (hit) treeView.reveal(hit, { select: true, focus: false, expand: true }).then(undefined, () => {});
   }
 
+  // 在显示文本（译文/补丁替换后）中定位锚文本：按原文行号在本行/邻行找，找不到返回 -1。
+  // 跳转目标处通常是标识符（宏名/函数名），不会被翻译，所以中文模式下也能精准命中。
+  function locateInShown(shown, raw, rel, anchor) {
+    if (!shown || !raw || !anchor || rel < 0 || rel > raw.length) return -1;
+    const lines = shown.split('\n');
+    let ln = 0;                            // 目标行号：用 indexOf 数，别 slice+match 建巨型数组
+    for (let p = raw.indexOf('\n'); p !== -1 && p < rel; p = raw.indexOf('\n', p + 1)) ln++;
+    const col = rel - (raw.lastIndexOf('\n', rel - 1) + 1);
+    const pick = (s, colHint) => {          // 行内多次出现取离列提示最近的
+      let best = -1, bd = Infinity;
+      for (let i = s.indexOf(anchor); i !== -1; i = s.indexOf(anchor, i + anchor.length)) {
+        const d = Math.abs(i - colHint);
+        if (d < bd) { bd = d; best = i; }
+      }
+      return best;
+    };
+    // 先本行，再 ±1、±2（容忍补丁/多行译文造成的行漂移）；顺序很关键，别让邻行的同名词抢在本行前面
+    for (const i of [ln, ln - 1, ln + 1, ln - 2, ln + 2]) {
+      if (i < 0 || i >= lines.length) continue;
+      const c = pick(lines[i], col);
+      if (c >= 0) {                        // 行内列换算成全文偏移：前面各行长度 + 换行数 + 列
+        let at = c;
+        for (let k = 0; k < i; k++) at += lines[k].length + 1;
+        return at;
+      }
+    }
+    return -1;   // 锚不在显示文本里（被翻译/补丁覆盖）→ 交给调用方整行定位，绝不瞎猜一个偏移
+  }
+
+  // 锚文本本身被翻译覆盖（如搜中的英文正文）时反查 i18n：找「英文包含该片段、且它在原文中的
+  // 某次出现覆盖 rel」的条目，用其中文译文当新锚。没有则 null。
+  function cnAnchorFor(kind, key, rel, frag, raw) {
+    const list = txMap && txMap[txKeyOf(kind, key)];
+    if (!list || !frag || !raw) return null;
+    for (const [en, cn] of list) {
+      if (!en || !cn || !en.includes(frag)) continue;
+      for (let i = raw.indexOf(en); i !== -1; i = raw.indexOf(en, i + en.length))
+        if (rel >= i && rel < i + en.length) return cn;
+    }
+    return null;
+  }
+
   async function openEntry(el) {
     const doc = await vscode.workspace.openTextDocument(el.g === 'js' ? jsUri(el.key) : passageUri(el.key));
     const ed = await vscode.window.showTextDocument(doc, { preview: true });
-    // 中文模式下译文替换了原文，偏移已失效，按译文文本重新定位
-    const at = el.find ? ed.document.getText().indexOf(el.find) : -1;
-    const off = at >= 0 ? at : el.off;
-    const len = at >= 0 ? el.find.length : el.len;
-    if (off !== undefined) {
+    // 中文结果自带译文锚（el.find）直接找；其余按锚文本在显示文本里重定位（中文模式/带补丁都精准）
+    const text = ed.document.getText();
+    let at = el.find ? text.indexOf(el.find) : -1;
+    let len = at >= 0 ? el.find.length : el.len;
+    // 中文结果：选区收窄到搜索词本身，而不是整句译文
+    if (at >= 0 && el.match && el.match !== el.find) {
+      const sub = el.find.indexOf(el.match);
+      if (sub >= 0) { at += sub; len = el.match.length; }
+    }
+    if (at < 0 && el.off !== undefined && el.match) {
+      const raw = rawContent(el.g, el.key);
+      let mapped = -1, mlen = 0;
+      const tryA = (a) => { const p = a ? locateInShown(text, raw, el.off, a) : -1; if (p >= 0) { mapped = p; mlen = a.length; } return p >= 0; };
+      if (cnMode && txMap && !el.cn) {       // 中文文档里的英文结果：原文多半被翻译覆盖，先反查译文锚
+        if (!tryA(cnAnchorFor(el.g, el.key, el.off, el.match, raw))) tryA(el.match);
+      } else tryA(el.match);
+      if (mapped >= 0) { at = mapped; len = mlen; }
+      else if (raw) {                        // 跨语言锚定不了（英文模式搜中文/中文模式搜被替换的英文）：定位并选中整行
+        let ln = 0;
+        for (let p = raw.indexOf('\n'); p !== -1 && p < el.off; p = raw.indexOf('\n', p + 1)) ln++;
+        let ls = 0;
+        for (let k = 0; k < ln && ls >= 0; k++) { const nl = text.indexOf('\n', ls); ls = nl === -1 ? -1 : nl + 1; }
+        if (ls >= 0) { const nl = text.indexOf('\n', ls); at = ls; len = (nl === -1 ? text.length : nl) - ls; }
+      }
+    }
+    if (at >= 0 || el.off !== undefined) {
+      const off = at >= 0 ? at : el.off;
       const s = ed.document.positionAt(off);
       const e = ed.document.positionAt(off + (len || 0));
       ed.selection = new vscode.Selection(s, e);
@@ -1258,12 +1340,22 @@ function registerGameData(context) {
   };
 
   // 命中处 → 单行结果（截断到一行）
+  const lnCur = { body: null, pos: -1, ln: 1 };   // 行号游标：命中按偏移递增到来时接着上次数，不再每次从文件头扫
   function lineItem(body, i, len) {
     let s = i; while (s > 0 && body[s - 1] !== '\n') s--;
     let e = i; while (e < body.length && body[e] !== '\n') e++;
     const n = len || 0;
+    let ln;
+    if (body === lnCur.body && s >= lnCur.pos) {
+      ln = lnCur.ln;
+      for (let p = body.indexOf('\n', lnCur.pos); p !== -1 && p < s; p = body.indexOf('\n', p + 1)) ln++;
+    } else {
+      ln = 1;
+      for (let p = body.indexOf('\n'); p !== -1 && p < s; p = body.indexOf('\n', p + 1)) ln++;
+    }
+    lnCur.body = body; lnCur.pos = s; lnCur.ln = ln;
     return {
-      line: (body.slice(0, s).match(/\n/g) || []).length + 1,
+      line: ln,
       pre: body.slice(Math.max(s, i - 90), i),
       match: body.slice(i, Math.min(i + n, e)),
       post: body.slice(i + n, Math.min(e, i + n + 90)),
@@ -1298,15 +1390,35 @@ function registerGameData(context) {
       return out;
     };
 
-    // 中文：先用翻译补丁反查英文原文，再定位源码
+    // 中文：先反查翻译条目拿到英文原文，再定位源码
     if (/[\u4e00-\u9fff]/.test(q)) {
-      const i18n = await resolveByGlob(cfg().get('i18nPath'), '**/i18n.json');
-      if (!i18n) { out.note = '未找到翻译补丁 JSON，请先设置 atools4dol.i18nPath'; return out; }
-      channel.appendLine('中文搜索：翻译补丁 = ' + i18n);
-      const found = await searchI18n(i18n, q, want + 1);
+      let found;
+      if (txMap) {
+        // 中文翻译启用过 → 翻译表已在内存：直接搜内存，不再把 65MB 的 i18n.json 逐行流式读一遍（搜一次卡一次的根源）。
+        // 条目键既可能是段落名也可能是 js 文件名，用段落名单区分路由（键冲突 practically 不存在）
+        const pgSet = new Set(index.passages.map((x) => x.name));
+        found = [];
+        for (const k of Object.keys(txMap)) {
+          const isP = pgSet.has(k);
+          for (const [f, t] of txMap[k]) {
+            if (String(t).includes(q) || String(f).includes(q)) {
+              found.push(isP ? { t, f, pN: k } : { t, f, fileName: k });
+              if (found.length >= want + 1) break;
+            }
+          }
+          if (found.length >= want + 1) break;
+        }
+      } else {
+        const i18n = await resolveByGlob(cfg().get('i18nPath'), '**/i18n.json');
+        if (!i18n) { out.note = '未找到翻译补丁 JSON，请先设置 atools4dol.i18nPath'; return out; }
+        channel.appendLine('中文搜索：翻译补丁 = ' + i18n);
+        found = await searchI18n(i18n, q, want + 1);
+      }
       channel.appendLine(`中文搜索「${q}」→ 翻译条目 ${found.length} 条`);
       // 主行显示中文译文、次行保留英文原句；只标出命中的词，find 供中文模式下按译文重新定位选区
       out.cn = true;
+      const bodyCache = new Map();   // 每个命中都要取一次正文：按文件缓存，避免大文件被反复 slice
+      const bodyC = (g, key) => { const k = g + '\n' + key; if (!bodyCache.has(k)) bodyCache.set(k, bodyOf(g, key)); return bodyCache.get(k); };
       const cnItem = (it, cn, en) => {
         const at = cn.indexOf(q);
         it.pre = at > 0 ? cn.slice(0, at) : '';
@@ -1320,7 +1432,7 @@ function registerGameData(context) {
           if (!twOn) continue;
           const p = index.passages.find((x) => x.name === h.pN);
           if (!p) continue;
-          const body = bodyOf('passage', p.name);
+          const body = bodyC('passage', p.name);
           const i = h.f ? body.indexOf(String(h.f)) : -1;
           const it = i >= 0 ? lineItem(body, i, String(h.f).length)
             : { line: 0, pre: '', match: '', post: '', note: '由翻译条目定位（源码中由宏生成）' };
@@ -1330,7 +1442,7 @@ function registerGameData(context) {
           if (!jsOn) continue;
           const f = index.jsFiles.find((x) => x.base === h.fileName);
           if (!f) continue;
-          const body = bodyOf('js', f.path);
+          const body = bodyC('js', f.path);
           const i = h.f ? body.indexOf(String(h.f)) : -1;
           if (i < 0) continue;
           const it = lineItem(body, i, String(h.f).length);
@@ -1390,30 +1502,45 @@ function registerGameData(context) {
           view.webview.postMessage(Object.assign({ type: 'result' }, lastResult));
           return;
         }
-        if (m.type === 'open') { if (m.cn) await setCn(true); await openEntry(m); }
+        if (m.type === 'open') await openEntry(m);
       });
     },
   }));
 
   // 定义 → 目标位置：直接在原始 HTML 的偏移上数行号
   // 不在这里生成整篇正文：中文模式下对 JS 全量做翻译替换要几秒，Ctrl 悬停每次都会调，会一直转圈
-  function defTarget(def) {
+  function defTarget(def, anchor) {
     if (!def) return null;
     const html = getHtml();
     if (!html) return null;
-    let uri, start, off;
+    let uri, kind, key, start, off;
     if (def.type === 'passage') {
       const p = index.passages.find((x) => x.name === def.key);
       if (!p) return null;
       uri = passageUri(p.name);
+      kind = 'passage'; key = p.name;
       start = p.bodyStart;
     } else {
       const f = index.jsFiles.find((x) => x.base === (def.key || def.file));
       if (!f) return null;
       uri = jsUri(f.path);
+      kind = 'js'; key = f.path;
       start = f.start;
     }
     off = Math.max(0, Math.min(def.offset - start, html.length - start));
+    // 中文模式下显示文本被译文替换，原文偏移的列会错位。目标处是标识符（不会被翻译），
+    // 以它为锚在显示文本里重定位；段落起点 off=0 恒为 (0,0)，无需映射。
+    if (anchor && off > 0) {
+      const shown = entryContent(kind, key);
+      const mapped = locateInShown(shown, rawContent(kind, key), off, anchor);
+      if (mapped >= 0) {
+        const line = (shown.slice(0, mapped).match(/\n/g) || []).length;
+        const last = shown.lastIndexOf('\n', mapped - 1);
+        const character = mapped - last - 1;
+        const pos = new vscode.Position(line, character);
+        return { uri, pos, range: new vscode.Range(pos, new vscode.Position(line, character + 1)) };
+      }
+    }
     let line = 0, last = -1;
     for (let i = 0; i < off; i++) if (html.charCodeAt(start + i) === 10) { line++; last = i; }
     const character = off - last - 1;
@@ -1571,7 +1698,7 @@ function registerGameData(context) {
         : (ctx ? index.setupAssign[ctx.base ? ctx.base + '.' + word : word]
           : (index.macroDef[word] || index.funcDef[word]));
     const one = (pos) => new vscode.Range(pos, new vscode.Position(pos.line, pos.character + 1));
-    const t = defTarget(def);
+    const t = defTarget(def, pg || word);   // 锚文本（段落名/标识符）不会被翻译，中文模式下靠它重定位
     if (t) return Object.assign({ uri: t.uri, pos: t.pos, range: t.range, label: pg || word }, preview ? gameCard(def, t) : null);
     // 工作区 .twee/.js 里的定义是真实路径（这里不读盘，保持 provideDefinition 纯函数的约定）
     const wk = pg ? wsPassages.get(pg) : (wsMacros[word] || wsFuncs[word]);
@@ -1978,6 +2105,7 @@ function registerGameData(context) {
     if (!ed) { channel.appendLine('未定位到源码文件：' + JSON.stringify(h)); return; }
     const text = ed.document.getText();
     let i = String(h.f) ? text.indexOf(String(h.f)) : -1;
+    if (i < 0 && h.t) i = text.indexOf(String(h.t));   // 中文模式下原文被译文替换：用译文定位
     if (i < 0 && h.pos !== undefined && Number(h.pos) < text.length) i = Number(h.pos);
     if (i >= 0) {
       const s = ed.document.positionAt(i);
