@@ -141,7 +141,13 @@ async function packMod(config, workspaceRoot, log = console.log) {
   }
 
   const version = boot.version || 'unknown';
-  const zipName = `${config.modName || 'Mod'}-v${version}.mod.zip`;
+  // 打包名：优先 boot.json 的 packName 模板（支持 ${name}/${version}/${nickName} 变量）；
+  // 没配 packName 才用「name-v版本」老格式。模板渲染后再补默认后缀，防止用户忘了写。
+  const vars = { name: boot.name || config.modName || 'Mod', version, nickName: boot.nickName || '' };
+  let zipName = boot.packName
+    ? boot.packName.replace(/\$\{(\w+)\}/g, (k, v) => (v in vars ? vars[v] : k))
+    : `${vars.name}-v${version}.mod.zip`;
+  if (!/\.mod\.zip$/i.test(zipName)) zipName += '.mod.zip';
   const outDir = path.isAbsolute(config.output)
     ? config.output
     : path.join(workspaceRoot, config.output || '.');

@@ -45,6 +45,7 @@ async function updateBootJsonContext() {
     bootPath,
     baseDir: path.dirname(bootPath),
     modName: data.name || 'DoLMod',
+    packName: data.packName || '',
     version: data.version || 'unknown',
     minify: data.minify === true,
   };
@@ -73,7 +74,7 @@ async function doPack(channel) {
   const cfg = buildConfig(getWorkspaceRoot());
   channel.appendLine("version: " + bootInfo.version);
   channel.appendLine("minify : " + cfg.minify);
-  channel.appendLine("filenam: " + `${cfg.modName}-v${bootInfo.version}.mod.zip`);
+  channel.appendLine("filenam: " + (bootInfo.packName || `${cfg.modName}-v${bootInfo.version}.mod.zip`));   // packName 是模板，实际文件名以 packMod 输出为准
   channel.appendLine("==================");
 
   const result = await packMod(cfg, getWorkspaceRoot(), (m) => channel.appendLine(m));
@@ -204,7 +205,7 @@ function scanFiles(dir, re) {
 
 // 工作区里没有 boot.json 时用来创建一个含全部默认键的文件
 const DEFAULT_BOOT = {
-  name: '', nickName: '', version: '1.0.0', minify: false,
+  name: '', nickName: '', packName: '', version: '1.0.0', minify: false,
   styleFileList: [], scriptFileList: [], scriptFileList_earlyload: [], scriptFileList_inject_early: [],
   scriptFileList_preload: [], tweeFileList: [], imgFileList: [], additionFile: [],
   addonPlugin: [
