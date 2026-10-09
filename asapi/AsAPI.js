@@ -86,6 +86,22 @@ window.AsAPI = { ...window.AsAPI,  // early inject
     // Debug
     debug: function(title, content, title_color = 'yellow') { if (AsAPI.debugon) this.log(title, content, title_color, 'gray', "warn") },
     debugon: false,
+    // 当没有 event 时重新加载当前 passage
+    reload: function() {
+        if (!V.event) {
+            SugarCube.Engine.play(V.passage);
+            return true;
+        }
+        return false;
+    },
+}
+Object.defineProperty(window, 'asi', { get() { return window.AsAPI; }, configurable: true });
+/* AsAPI: End @early inject */
+
+
+
+/* AsAPI: Start @inject */
+window.AsAPI = { ...window.AsAPI,  // inject
     // 【工具】注入游戏函数，在调用原函数后再执行指定的功能。
     onFunction: function(originalFn, afterFn) {
         return new Proxy(originalFn, {
@@ -98,11 +114,11 @@ window.AsAPI = { ...window.AsAPI,  // early inject
     },
     // 【工具】注入游戏宏，在调用原宏后再执行指定的功能。
     onMacro: function(macroName, afterFn) {
-        let originalMacro = SugarCube.Macro.get(macroName);
+        let originalMacro = Macro.get(macroName);
         if (originalMacro) {
             let oldHandler = originalMacro.handler;
-            SugarCube.Macro.delete(macroName);
-            SugarCube.Macro.add(macroName, {
+            Macro.delete(macroName);
+            Macro.add(macroName, {
                 handler: function () {
                     oldHandler.apply(this, arguments);
                     afterFn.apply(this, arguments);
@@ -139,21 +155,6 @@ window.AsAPI = { ...window.AsAPI,  // early inject
             asi.log(modname, `已自动完成所有函数和宏注入`, modcolor, "green");
         });
     },
-    // 当没有 event 时重新加载当前 passage
-    reload: function() {
-        if (!V.event) {
-            SugarCube.Engine.play(passage());
-            return true;
-        }
-        return false;
-    },
 }
-Object.defineProperty(window, 'asi', { get() { return window.AsAPI; }, configurable: true });
-/* AsAPI: End @early inject */
-
-
-
-/* AsAPI: Start @inject */
-
 /* AsAPI: End @inject */
 
